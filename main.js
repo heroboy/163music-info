@@ -1,0 +1,102 @@
+import { clearScreenDown } from 'readline';
+
+const request = require('request');
+const ID3Writer = require('browser-id3-writer');
+const fs = require('fs');
+
+function requestJson(url)
+{
+	return new Promise((resolve, reject) =>
+	{
+		request.get(url, (err, resp, body) =>
+		{
+			if (err)
+			{
+				reject(err);
+				return;
+			}
+
+			if (resp.statusCode !== 200)
+			{
+				reject(new Error('status != 200'));
+				return;
+			}
+
+			if (typeof body !== 'string')
+			{
+				reject(new Error('body not text'));
+				return;
+			}
+			resolve(JSON.parse(body));
+		});
+	});
+}
+
+function requestBuffer(url)
+{
+	return new Promise((resolve, reject) =>
+	{
+		request.get({ url: url, encoding: null }, (err, resp, body) =>
+		{
+			if (err)
+			{
+				reject(err);
+				return;
+			}
+
+			if (resp.statusCode !== 200)
+			{
+				reject(new Error('status != 200'));
+				return;
+			}
+
+			if (!Buffer.isBuffer(body))
+			{
+				console.log(body)
+				reject(new Error('body not Buffer'));
+				return;
+			}
+			resolve(body);
+		});
+	});
+}
+
+
+async function process(id)
+{
+	const songBuffer = fs.readFileSync(`in/${id}.mp3`);
+	const songInfo = (await requestJson(`http://127.0.0.1:3000/song/detail?ids=${id}`)).songs[0];
+	const writer = new ID3Writer(songBuffer);
+	writer.setFrame('TIT2', songInfo.name); //song title
+	writer.setFrame('TALB', songInfo.al.name); //album title
+	writer.setFrame('TPE1', songInfo.ar.map(x => x.name)); //song artists
+	writer.setFrame('TRCK',songInfo.no.toString());//song number in album
+	//cover
+	writer.setFrame('APIC', {
+		type: 3, //cover
+		data: await requestBuffer(songInfo.al.picUrl),
+		description: '',
+		useUnicodeEncoding: false
+	});
+	writer.addTag();
+
+	const taggedSongBuffer = Buffer.from(writer.arrayBuffer);
+	fs.writeFileSync(`out/${id}.mp3`, taggedSongBuffer);
+}
+
+async function main()
+{
+	for(f of fs.readdirSync('in/'))
+	{
+		let m = /([0-9]+)\.mp3/i.exec(f);
+		
+		if (m && !fs.statSync(`out/${m[1]}.mp3`))
+		{
+			console.log('start process:',f)
+			await process(m[1]);
+		}
+	}
+	
+}
+
+main();
