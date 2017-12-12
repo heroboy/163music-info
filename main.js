@@ -1,9 +1,7 @@
-import { clearScreenDown } from 'readline';
-
 const request = require('request');
 const ID3Writer = require('browser-id3-writer');
 const fs = require('fs');
-
+const { createWebAPIRequest } = require('./NeteaseCloudMusicApi/util/util');
 function requestJson(url)
 {
 	return new Promise((resolve, reject) =>
@@ -61,23 +59,51 @@ function requestBuffer(url)
 	});
 }
 
+async function getSongDetail(id)
+{
+	//const id = parseInt(req.query.ids)
+	const data = {
+		c: JSON.stringify([{ id: id }]),
+		ids: '[' + id + ']',
+		csrf_token: ''
+	}
+	const cookie = '';
+	return new Promise((resolve, reject) =>
+	{
+		createWebAPIRequest(
+			'music.163.com',
+			'/weapi/v3/song/detail',
+			'POST',
+			data,
+			cookie,
+			music_req =>
+			{
+				let obj = JSON.parse(music_req);
+				resolve(obj);
+			},
+			reject
+		)
+
+	});
+}
+
 
 async function process(id)
 {
 	const songBuffer = fs.readFileSync(`in/${id}.mp3`);
-	const songInfo = (await requestJson(`http://127.0.0.1:3000/song/detail?ids=${id}`)).songs[0];
+	const songInfo = (await getSongDetail(id)).songs[0];
 	const writer = new ID3Writer(songBuffer);
 	writer.setFrame('TIT2', songInfo.name); //song title
 	writer.setFrame('TALB', songInfo.al.name); //album title
 	writer.setFrame('TPE1', songInfo.ar.map(x => x.name)); //song artists
-	writer.setFrame('TRCK',songInfo.no.toString());//song number in album
+	writer.setFrame('TRCK', songInfo.no.toString());//song number in album
 	//cover
-	writer.setFrame('APIC', {
-		type: 3, //cover
-		data: await requestBuffer(songInfo.al.picUrl),
-		description: '',
-		useUnicodeEncoding: false
-	});
+	//writer.setFrame('APIC', {
+	//	type: 3, //cover
+	//	data: await requestBuffer(songInfo.al.picUrl),
+	//	description: '',
+	//	useUnicodeEncoding: false
+	//});
 	writer.addTag();
 
 	const taggedSongBuffer = Buffer.from(writer.arrayBuffer);
@@ -86,17 +112,27 @@ async function process(id)
 
 async function main()
 {
-	for(f of fs.readdirSync('in/'))
+	function exists(path)
+	{
+		try
+		{
+			return fs.statSync(path) != null;
+		}
+		catch(e)
+		{
+			return false;
+		}
+	}
+	for (f of fs.readdirSync('in/'))
 	{
 		let m = /([0-9]+)\.mp3/i.exec(f);
-		
-		if (m && !fs.statSync(`out/${m[1]}.mp3`))
+
+		if (m && !exists(`out/${m[1]}.mp3`))
 		{
-			console.log('start process:',f)
+			console.log('start process:', f)
 			await process(m[1]);
 		}
 	}
-	
 }
-
 main();
+//getSongDetail(792383).then(console.log);
